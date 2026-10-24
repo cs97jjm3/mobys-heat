@@ -1,0 +1,12 @@
+# Your own settings and data: never commit these
+heating_config.ini
+heating.db
+heating.db-journal
+esi_settings.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/

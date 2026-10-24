@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moby's Heat</title>
+<meta name="theme-color" content="#d9541e">
+<meta name="apple-mobile-web-app-title" content="Moby's Heat">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f1ec; --card: #ffffff; --ink: #1d1b19; --muted: #6f6a64; --faint: #9a948c;
+    --line: #e9e4dd; --grid: #efebe5;
+    --warm: #d9541e; --warm-soft: #fbe6dc;
+    --room: #eb6834; --outside: #2a78d6; --set: #8a847c;
+    --cold: #2a78d6; --mid: #f0efec; --hot: #d03b3b;
+    --ok: #2e7d4f; --bad: #b3261e;
+    --shadow: 0 1px 2px rgba(40, 30, 20, .04), 0 4px 16px rgba(40, 30, 20, .04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #141210; --card: #1e1b18; --ink: #f2eee9; --muted: #a8a198; --faint: #7d776f;
+      --line: #322d28; --grid: #2a2622;
+      --warm: #ff7a45; --warm-soft: #3a2418;
+      --room: #d95926; --outside: #3987e5; --set: #a39d95;
+      --cold: #3987e5; --mid: #383835; --hot: #e66767;
+      --ok: #5cc28a; --bad: #ff8a80;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  /* ----- top bar ----- */
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+         padding: 18px 28px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .logo { width: 36px; height: 36px; border-radius: 9px; display: block; }
+  .brand h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+  .brand .house { color: var(--muted); font-size: 15px; }
+  .status { display: flex; align-items: center; gap: 18px; font-size: 13px; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         background: var(--ok); margin-right: 6px; vertical-align: 1px; }
+  .dot.off { background: var(--bad); }
+  .msg { font-size: 13px; color: var(--muted); }
+  .msg.err { color: var(--bad); }
+
+  /* ----- layout ----- */
+  main { padding: 0 28px 40px; max-width: 1680px; margin: 0 auto; }
+  .layout { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 20px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .wide-left { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 340px minmax(0, 1fr); }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .wide-left, .two { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 820px) {
+    .bar { padding: 16px; }
+    main { padding: 0 12px 32px; }
+    .layout, .col { display: contents; }
+    #app { display: flex; flex-direction: column; gap: 14px; }
+    .card, .tiles, .two, .wide-left { order: var(--o, 50); }
+    .two, .wide-left { gap: 14px; }
+    .tiles { gap: 10px; }
+  }
+
+  /* ----- cards ----- */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+          padding: 20px 22px; box-shadow: var(--shadow); min-width: 0; }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+          margin-bottom: 12px; flex-wrap: wrap; }
+  .title { font-size: 14px; font-weight: 600; margin: 0; }
+  .sub { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  .section { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+
+  /* ----- now / gauge ----- */
+  .gauge { display: block; width: 100%; max-width: 300px; margin: 0 auto; }
+  .gauge text { font-family: inherit; }
+  .now-row { display: flex; justify-content: center; gap: 28px; margin-top: 2px; }
+  .now-row div { text-align: center; }
+  .now-row .v { font-size: 22px; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .now-row .l { font-size: 12px; color: var(--muted); }
+  .now-row .out { color: var(--outside); }
+  .mode-wrap { text-align: center; margin-top: 14px; }
+  .mode { display: inline-block; padding: 5px 14px; border-radius: 999px;
+          background: var(--line); font-size: 13px; font-weight: 500; }
+  .mode.m3 { background: var(--warm-soft); color: var(--warm); }
+  .mode.m4 { color: var(--outside); }
+  .warn { background: var(--warm-soft); color: var(--warm); border-radius: 10px;
+          padding: 8px 12px; font-size: 13px; margin-top: 12px; text-align: center; }
+
+  /* ----- tiles ----- */
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+          padding: 16px 18px; box-shadow: var(--shadow); min-width: 0; }
+  .tile .k { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .tile .k i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .tile .v { font-size: 28px; font-weight: 400; margin: 6px 0 2px; letter-spacing: -.01em;
+             font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tile .v small { font-size: 15px; color: var(--muted); }
+  .tile .s { font-size: 12px; color: var(--muted); }
+  .tile .up { color: var(--warm); }
+  .tile .down { color: var(--ok); }
+
+  /* ----- controls ----- */
+  .stepper { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .stepper .val { font-size: 30px; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--card);
+    color: var(--ink); border-radius: 12px; padding: 11px 12px; cursor: pointer; flex: 1; min-width: 0;
+  }
+  button:hover { border-color: var(--faint); }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.round { flex: 0 0 46px; height: 46px; padding: 0; font-size: 22px; }
+  button.primary { background: var(--warm); border-color: var(--warm); color: #fff; }
+  button.quiet { color: var(--muted); }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button { flex: none; padding: 4px 11px; font-size: 12px; border-radius: 999px; }
+  .tabs button.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
+  .presets { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+             margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line);
+             font-size: 13px; color: var(--muted); }
+  .presets b { color: var(--ink); font-weight: 500; }
+  .presets button, .smallbtn { flex: none; padding: 5px 12px; font-size: 12px; border-radius: 999px; }
+  .pedit { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center;
+           margin-top: 12px; font-size: 14px; }
+  .pedit .v { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+  .pedit button { flex: none; width: 36px; height: 36px; padding: 0; }
+
+  /* ----- smart + plan ----- */
+  .toggle { flex: none; padding: 4px 14px; font-size: 12px; border-radius: 999px; }
+  .toggle.on { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .note { font-size: 14px; margin: 4px 0 8px; }
+  .who { font-size: 12px; color: var(--muted); }
+  .plan, .rules, .log { list-style: none; margin: 10px 0 0; padding: 0; font-size: 14px; }
+  .plan li, .rules li { display: flex; align-items: center; gap: 10px; padding: 7px 0;
+                        border-top: 1px solid var(--line); }
+  .plan li .t { font-variant-numeric: tabular-nums; }
+  .x { margin-left: auto; flex: none !important; width: 28px; height: 28px; padding: 0 !important;
+       border-radius: 999px !important; color: var(--muted); }
+  .addform { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .addform label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  .addform select, .addform input, .ruleform select, .ruleform input, textarea {
+    font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
+  .addform button, .ruleform button { grid-column: 1 / -1; }
+  .ruleform { display: grid; grid-template-columns: 1.3fr 0.8fr; gap: 8px; margin-top: 10px; }
+  textarea { min-height: 64px; resize: vertical; margin: 8px 0; }
+  .divider { border-top: 1px solid var(--line); margin: 16px 0 12px; }
+  .suggest { background: var(--bg); border-radius: 12px; padding: 14px; margin-top: 10px; font-size: 14px; }
+  .suggest h3 { font-size: 12px; color: var(--muted); font-weight: 500; margin: 12px 0 4px; }
+  .suggest h3:first-child { margin-top: 0; }
+  .suggest ul { margin: 0; padding-left: 18px; }
+  .suggest li { margin: 3px 0; }
+  .suggest .why { color: var(--muted); }
+  .paused { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+            background: var(--line); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 6px 0; }
+  .log li { display: flex; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); }
+  .log li:first-child { border-top: 0; }
+  .log .when { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; min-width: 72px; }
+  .log .bad { color: var(--bad); }
+  .empty { font-size: 14px; color: var(--muted); padding: 28px 0; text-align: center; }
+
+  /* ----- charts ----- */
+  .chart { position: relative; width: 100%; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+  .chart .lbl { font-size: 12px; font-weight: 600; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { display: inline-block; width: 16px; height: 2px; border-radius: 2px; }
+  .legend i.dash { background: repeating-linear-gradient(90deg, var(--set) 0 4px, transparent 4px 7px) !important; }
+  .legend i.box { height: 10px; width: 14px; border-radius: 3px; }
+  .scale { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .scale .bar-g { width: 140px; height: 8px; border-radius: 4px; }
+  .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--card); color: var(--ink);
+         border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px;
+         box-shadow: 0 6px 24px rgba(0,0,0,.14); display: none; min-width: 120px; }
+  .tip .t { color: var(--muted); margin-bottom: 4px; }
+  .tip .r { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .tip .r span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .tip .r i { width: 10px; height: 2px; border-radius: 2px; display: inline-block; }
+  .tip .r b { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ----- PIN ----- */
+  .pin { text-align: center; padding: 40px 20px; max-width: 380px; margin: 60px auto; }
+  .pin input { font: inherit; font-size: 28px; letter-spacing: .4em; text-align: center;
+               width: 180px; padding: 10px; border-radius: 12px; border: 1px solid var(--line);
+               background: var(--bg); color: var(--ink); margin: 14px 0; }
+  .pin button { width: 180px; flex: none; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><img src="/static/logo.svg" alt="" class="logo"><h1>Moby's Heat</h1><span class="house" id="house"></span></div>
+  <div class="status">
+    <span class="msg" id="msg"></span>
+    <span id="online"></span>
+    <span id="updated"></span>
+  </div>
+</header>
+<main id="app"><div class="card">Loading…</div></main>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+const state = { devices: [], outside: null, activity: [], chosen: {}, smart: null, insights: null,
+                editPresets: null, form: {days: "weekdays", ready: "06:30", until: "08:30", temp: 20},
+                ruleForm: {when: "at_or_above", outside: 17, rule_action: "skip", amount: 0.5},
+                extra: "", thinking: false, range: 24, history: {}, skew: 0 };
+const $ = id => document.getElementById(id);
+const nowSec = () => Date.now() / 1000 + state.skew;
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function fmt(t, digits = 1) { return t == null ? "–" : t.toFixed(digits) + "°"; }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+}
+function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); }
+function when(ts) {
+  const d = new Date(ts * 1000), today = new Date();
+  if (d.toDateString() === today.toDateString()) return clock(ts);
+  return d.toLocaleDateString([], {weekday: "short"}) + " " + clock(ts);
+}
+function hrs(h) {
+  if (h == null) return "–";
+  const whole = Math.floor(h), mins = Math.round((h - whole) * 60);
+  return whole ? `${whole} h ${String(mins).padStart(2, "0")}` : `${mins} min`;
+}
+
+function boostText(d) {
+  if (d.mode !== "3") return d.mode_name;
+  if (!d.boost_ends) return "Boost";
+  const mins = Math.ceil((d.boost_ends - nowSec()) / 60);
+  if (mins <= 0) return "Boost · ending";
+  if (mins >= 60) return `Boost · ${Math.floor(mins / 60)} h ${mins % 60} min left`;
+  return `Boost · ${mins} min left`;
+}
+
+// ---------- tooltip ----------
+const tip = $("tip");
+function showTip(html, x, y) {
+  tip.innerHTML = html;
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = x + 14, top = y + 14;
+  if (left + w > window.innerWidth - 8) left = x - w - 14;
+  if (top + h > window.innerHeight - 8) top = y - h - 14;
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+function tipRow(colour, label, value, dash) {
+  const bg = dash ? `repeating-linear-gradient(90deg, ${colour} 0 3px, transparent 3px 5px)` : colour;
+  return `<div class="r"><span><i style="background:${bg}"></i>${label}</span><b>${value}</b></div>`;
+}
+
+// ---------- PIN ----------
+function showPin(error) {
+  state.locked = true;
+  $("app").innerHTML = `
+    <div class="card pin">
+      <div>Enter the PIN</div>
+      <form onsubmit="sendPin(event)">
+        <input id="pin" type="password" inputmode="numeric" autocomplete="off" autofocus><br>
+        <button class="primary" type="submit">Unlock</button>
+      </form>
+    </div>`;
+  message(error || "", !!error);
+  setTimeout(() => $("pin") && $("pin").focus(), 50);
+}
+async function sendPin(e) {
+  e.preventDefault();
+  const r = await fetch("/api/login", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({pin: $("pin").value})});
+  const data = await r.json();
+  if (data.ok) { state.locked = false; message(""); load(); } else showPin(data.error);
+}
+
+// ---------- page ----------
+function render() {
+  if (!state.devices.length) { $("app").innerHTML = '<div class="card">No thermostats found.</div>'; return; }
+  const d = state.devices[0];
+  if (state.chosen[d.id] == null) state.chosen[d.id] = d.target && d.target >= 10 ? d.target : 20;
+
+  $("house").textContent = d.name || "";
+  $("online").innerHTML = `<span class="dot ${d.online ? "" : "off"}"></span>${d.online ? "Online" : "Offline"}`;
+
+  $("app").innerHTML = `
+  <div class="layout">
+    <div class="col">
+      ${nowCard(d)}
+      ${controlsCard(d)}
+      ${smartHtml(d)}
+    </div>
+    <div class="col">
+      <div class="tiles" style="--o:2">${tilesHtml(d)}</div>
+      <div class="card" style="--o:4">
+        <div class="head">
+          <p class="title">Temperature</p>
+          <div class="legend">
+            <span><i style="background:var(--room)"></i>Room</span>
+            <span><i class="dash"></i>Set to</span>
+            <span><i style="background:var(--outside)"></i>Outside</span>
+            <span><i class="box" style="background:var(--warm-soft)"></i>Boost</span>
+          </div>
+          <div class="tabs">
+            ${[[24, "24 hours"], [168, "7 days"], [720, "30 days"]].map(([h, l]) =>
+              `<button class="${state.range === h ? "on" : ""}" onclick="setRange(${h})">${l}</button>`).join("")}
+          </div>
+        </div>
+        <div class="chart" id="c-history" data-h="300"></div>
+      </div>
+      <div class="two" style="--o:6">
+        <div class="card">
+          <div class="head"><p class="title">Heating on each day</p><span class="sub" style="margin:0">last 14 days, estimated</span></div>
+          <div class="chart" id="c-days" data-h="200"></div>
+        </div>
+        <div class="card">
+          <div class="head"><p class="title">Outside, next 24 hours</p><span class="sub" style="margin:0">forecast for your postcode</span></div>
+          <div class="chart" id="c-forecast" data-h="200"></div>
+        </div>
+      </div>
+      <div class="wide-left" style="--o:7">
+        <div class="card">
+          <div class="head"><p class="title">Room temperature by hour</p>
+            <div class="scale"><span>cooler</span><span class="bar-g" id="scale-bar"></span><span>warmer</span></div></div>
+          <div class="chart" id="c-heatmap"></div>
+        </div>
+        <div class="card">
+          <div class="head"><p class="title">How fast it warms up</p></div>
+          <div class="chart" id="c-warmup" data-h="220"></div>
+        </div>
+      </div>
+      <div class="two" style="--o:8">
+        ${planFromDataHtml(d)}
+        ${logCard()}
+      </div>
+    </div>
+  </div>`;
+  drawCharts();
+}
+
+function nowCard(d) {
+  return `<div class="card" style="--o:1">
+    ${gauge(d.room, d.target)}
+    <div class="now-row">
+      <div><div class="v">${fmt(d.target)}</div><div class="l">Set to</div></div>
+      <div><div class="v out">${fmt(state.outside)}</div><div class="l">Outside</div></div>
+    </div>
+    <div class="mode-wrap"><span class="mode m${d.mode}" data-boost="${d.id}">${boostText(d)}</span></div>
+    ${d.battery_low ? '<div class="warn">The thermostat battery is low</div>' : ""}
+  </div>`;
+}
+
+function gauge(room, target) {
+  const lo = 10, hi = 26, start = 215, sweep = 250;
+  const cx = 150, cy = 140, r = 108;
+  const ang = v => (start - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo) * sweep) * Math.PI / 180;
+  const pt = (a, rr = r) => [cx + rr * Math.cos(a), cy - rr * Math.sin(a)];
+  const arc = (v0, v1) => {
+    const [x0, y0] = pt(ang(v0)), [x1, y1] = pt(ang(v1));
+    const large = (v1 - v0) / (hi - lo) * sweep > 180 ? 1 : 0;
+    return `M${x0.toFixed(1)},${y0.toFixed(1)} A${r},${r} 0 ${large} 1 ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  };
+  let ticks = "";
+  for (let v = lo; v <= hi; v += 2) {
+    const [a1, b1] = pt(ang(v), r - 20), [a2, b2] = pt(ang(v), r - 15);
+    ticks += `<line x1="${a1}" y1="${b1}" x2="${a2}" y2="${b2}" stroke="var(--faint)" stroke-width="1.5" stroke-linecap="round"/>`;
+  }
+  const [lx, ly] = pt(ang(lo), r + 2), [hx, hy] = pt(ang(hi), r + 2);
+  let marker = "";
+  if (target != null) {
+    const [m1, n1] = pt(ang(target), r - 13), [m2, n2] = pt(ang(target), r + 13);
+    marker = `<line x1="${m1}" y1="${n1}" x2="${m2}" y2="${n2}" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>`;
+  }
+  return `<svg class="gauge" viewBox="0 0 300 250" role="img"
+      aria-label="Room ${fmt(room)}, set to ${fmt(target)}">
+    <path d="${arc(lo, hi)}" fill="none" stroke="var(--line)" stroke-width="14" stroke-linecap="round"/>
+    ${room != null ? `<path d="${arc(lo, room)}" fill="none" stroke="var(--room)" stroke-width="14" stroke-linecap="round"/>` : ""}
+    ${ticks}${marker}
+    <text x="${lx}" y="${ly + 22}" text-anchor="middle" font-size="12" fill="var(--muted)">${lo}°</text>
+    <text x="${hx}" y="${hy + 22}" text-anchor="middle" font-size="12" fill="var(--muted)">${hi}°</text>
+    <text x="${cx + 6}" y="${cy + 10}" text-anchor="middle" font-size="54" font-weight="300" fill="var(--ink)"
+      style="font-variant-numeric: tabular-nums">${room == null ? "–" : room.toFixed(1)}<tspan font-size="26" dy="-22">°</tspan></text>
+    <text x="${cx}" y="${cy + 40}" text-anchor="middle" font-size="13" fill="var(--muted)">In the room</text>
+  </svg>`;
+}
+
+function tilesHtml(d) {
+  const ins = state.insights;
+  const today = ins ? ins.days[ins.days.length - 1] : null;
+  const yday = ins ? ins.days[ins.days.length - 2] : null;
+  let heatSub = "";
+  if (today && yday && today.heating_hours != null && yday.heating_hours != null) {
+    const diff = today.heating_hours - yday.heating_hours;
+    heatSub = `<span class="${diff > 0 ? "up" : "down"}">${diff > 0 ? "▲" : "▼"} ${hrs(Math.abs(diff))}</span> vs yesterday`;
+  } else heatSub = "so far today";
+  const w = ins ? ins.warmup : null;
+  const range = (a, b) => a == null ? "–" : `${a.toFixed(1)}<small> to </small>${b.toFixed(1)}°`;
+  return `
+    <div class="tile"><div class="k"><i style="background:var(--room)"></i>Room today</div>
+      <div class="v">${today ? range(today.room_min, today.room_max) : "–"}</div>
+      <div class="s">${today && today.room_avg != null ? `average ${fmt(today.room_avg)}` : "low to high"}</div></div>
+    <div class="tile"><div class="k"><i style="background:var(--outside)"></i>Outside today</div>
+      <div class="v">${today ? range(today.outside_min, today.outside_max) : "–"}</div>
+      <div class="s">now ${fmt(state.outside)}</div></div>
+    <div class="tile"><div class="k"><i style="background:var(--warm)"></i>Heating on today</div>
+      <div class="v">${today ? hrs(today.heating_hours) : "–"}</div>
+      <div class="s">${heatSub}</div></div>
+    <div class="tile"><div class="k"><i style="background:var(--set)"></i>Warm-up speed</div>
+      <div class="v">${w ? w.rate_now.toFixed(1) : "–"}<small>° an hour</small></div>
+      <div class="s">${w && w.learned ? `at ${fmt(state.outside, 0)} outside` : "still learning"}</div></div>`;
+}
+
+function controlsCard(d) {
+  const c = state.chosen[d.id];
+  return `<div class="card" style="--o:3">
+    <p class="title" style="margin-bottom:12px">Control</p>
+    <div class="stepper">
+      <button class="round" onclick="nudge('${d.id}', -0.5)" aria-label="Lower">−</button>
+      <span class="val">${c.toFixed(1)}°</span>
+      <button class="round" onclick="nudge('${d.id}', 0.5)" aria-label="Higher">+</button>
+    </div>
+    <p class="section">Boost at ${c.toFixed(1)}° for</p>
+    <div class="row" style="margin-bottom:10px">
+      <button class="primary" onclick="act('${d.id}', 'boost', {hours: 1})">1 hour</button>
+      <button onclick="act('${d.id}', 'boost', {hours: 2})">2 hours</button>
+      <button onclick="act('${d.id}', 'boost', {hours: 3})">3 hours</button>
+    </div>
+    <div class="row">
+      <button onclick="act('${d.id}', 'manual')">Hold ${c.toFixed(1)}°</button>
+      <button onclick="act('${d.id}', 'schedule')">Schedule</button>
+      <button class="quiet" onclick="act('${d.id}', 'off')">Off</button>
+    </div>
+    ${presetsHtml(d)}
+  </div>`;
+}
+
+function logCard() {
+  const log = state.activity.length
+    ? `<ul class="log">${state.activity.map(a => `
+        <li><span class="when">${when(a.ts)}</span>
+        <span class="${a.ok ? "" : "bad"}">${escapeHtml(a.text)}</span></li>`).join("")}</ul>`
+    : '<div class="empty">Nothing changed from here yet.</div>';
+  return `<div class="card" style="--o:9"><p class="title" style="margin-bottom:8px">Recent changes</p>${log}</div>`;
+}
+
+// ---------- charts ----------
+function drawCharts() {
+  const d = state.devices[0];
+  if (!d) return;
+  drawHistory(state.history[d.id]);
+  if (state.insights) {
+    drawDays(state.insights.days);
+    drawForecast(state.insights.forecast);
+    drawHeatmap(state.insights.heatmap);
+    drawWarmup(state.insights.warmup);
+  } else {
+    ["c-days", "c-forecast", "c-heatmap", "c-warmup"].forEach(id => { if ($(id)) $(id).innerHTML = '<div class="empty">Loading…</div>'; });
+  }
+  const sb = $("scale-bar");
+  if (sb) sb.style.background = `linear-gradient(90deg, ${css("--cold")}, ${css("--mid")}, ${css("--hot")})`;
+}
+
+function box(id) {
+  const el = $(id);
+  if (!el) return null;
+  return {el, W: Math.max(240, el.clientWidth), H: +(el.dataset.h || 200)};
+}
+
+function niceTicks(lo, hi, want = 5) {
+  const span = hi - lo, raw = span / want;
+  const step = [1, 2, 2.5, 5, 10].map(m => m * Math.pow(10, Math.floor(Math.log10(raw))))
+    .find(s => s >= raw) || raw;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(2));
+  return out;
+}
+
+function yGrid(ticks, y, L, W, R, unit) {
+  return ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>
+    <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}${unit}</text>`).join("");
+}
+
+// Main temperature chart with crosshair
+function drawHistory(points) {
+  const b = box("c-history");
+  if (!b) return;
+  if (!points) { b.el.innerHTML = '<div class="empty">Loading history…</div>'; return; }
+  if (points.length < 2) { b.el.innerHTML = '<div class="empty">History builds up as the dashboard runs. Check back in a little while.</div>'; return; }
+  const {W, H} = b, L = 36, R = 12, T = 10, B = 26;
+  const t1 = nowSec(), t0 = t1 - state.range * 3600;
+  const vals = points.flatMap(p => [p.room, p.target, p.outside]).filter(v => v != null);
+  const lo = Math.floor(Math.min(...vals) - 1), hi = Math.ceil(Math.max(...vals) + 1);
+  const x = t => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const gap = Math.max(20 * 60, state.range * 3600 / 400);
+
+  let shade = "";
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].mode !== "3") continue;
+    let j = i;
+    while (j + 1 < points.length && points[j + 1].mode === "3") j++;
+    const end = j + 1 < points.length ? points[j + 1].ts : points[j].ts;
+    shade += `<rect x="${x(points[i].ts)}" y="${T}" width="${Math.max(2, x(end) - x(points[i].ts))}"
+      height="${H - T - B}" fill="var(--warm-soft)"/>`;
+    i = j;
+  }
+
+  let xt = "";
+  if (state.range <= 24) {
+    const s = new Date(t0 * 1000); s.setMinutes(0, 0, 0);
+    for (let t = s.getTime() / 1000; t <= t1; t += 3600) {
+      const h = new Date(t * 1000).getHours();
+      if (t < t0 || h % (W > 640 ? 3 : 6)) continue;
+      xt += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${String(h).padStart(2, "0")}:00</text>`;
+    }
+  } else {
+    const s = new Date(t0 * 1000); s.setHours(0, 0, 0, 0);
+    const every = state.range > 200 ? (W > 640 ? 4 : 7) : (W > 520 ? 1 : 2);
+    let n = 0;
+    for (let t = s.getTime() / 1000 + 86400; t <= t1; t += 86400, n++) {
+      const dt = new Date(t * 1000);
+      xt += `<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H - B}" stroke="var(--grid)"/>`;
+      if (n % every === 0) xt += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${
+        dt.toLocaleDateString([], every > 1 ? {day: "numeric", month: "short"} : {weekday: "short", day: "numeric"})}</text>`;
+    }
+  }
+
+  const line = (field, colour, extra = "") => {
+    let d = "", prev = null;
+    for (const p of points) {
+      if (p[field] == null) { prev = null; continue; }
+      d += `${prev && p.ts - prev.ts <= gap ? "L" : "M"}${x(p.ts).toFixed(1)},${y(p[field]).toFixed(1)}`;
+      prev = p;
+    }
+    return `<path d="${d}" fill="none" stroke="${colour}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${extra}/>`;
+  };
+
+  b.el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Room, set and outside temperature over time">
+    ${shade}${yGrid(niceTicks(lo, hi, 6), y, L, W, R, "°")}${xt}
+    ${line("outside", "var(--outside)")}
+    ${line("target", "var(--set)", 'stroke-dasharray="5 4"')}
+    ${line("room", "var(--room)")}
+    <g id="hx" style="display:none">
+      <line y1="${T}" y2="${H - B}" stroke="var(--faint)" stroke-width="1"/>
+      <circle r="4.5" fill="var(--room)" stroke="var(--card)" stroke-width="2" data-f="room"/>
+      <circle r="4.5" fill="var(--outside)" stroke="var(--card)" stroke-width="2" data-f="outside"/>
+    </g>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="hhit"/>
+  </svg>`;
+
+  const svg = b.el.querySelector("svg"), g = b.el.querySelector("#hx");
+  b.el.querySelector("#hhit").addEventListener("pointermove", e => {
+    const rect = svg.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * W / rect.width;
+    const t = t0 + (px - L) / (W - L - R) * (t1 - t0);
+    let lo2 = 0, hi2 = points.length - 1;
+    while (hi2 - lo2 > 1) { const m = (lo2 + hi2) >> 1; if (points[m].ts < t) lo2 = m; else hi2 = m; }
+    const p = Math.abs(points[lo2].ts - t) < Math.abs(points[hi2].ts - t) ? points[lo2] : points[hi2];
+    if (Math.abs(p.ts - t) > gap) { g.style.display = "none"; hideTip(); return; }
+    g.style.display = "";
+    g.querySelector("line").setAttribute("x1", x(p.ts)); g.querySelector("line").setAttribute("x2", x(p.ts));
+    g.querySelectorAll("circle").forEach(c => {
+      const v = p[c.dataset.f];
+      c.style.display = v == null ? "none" : "";
+      if (v != null) { c.setAttribute("cx", x(p.ts)); c.setAttribute("cy", y(v)); }
+    });
+    showTip(`<div class="t">${when(p.ts)}${p.mode === "3" ? " · Boost" : ""}</div>
+      ${tipRow(css("--room"), "Room", fmt(p.room))}
+      ${tipRow(css("--set"), "Set to", fmt(p.target), true)}
+      ${tipRow(css("--outside"), "Outside", fmt(p.outside))}`, e.clientX, e.clientY);
+  });
+  b.el.querySelector("#hhit").addEventListener("pointerleave", () => { g.style.display = "none"; hideTip(); });
+}
+
+// Bars: hours of heating per day
+function drawDays(days) {
+  const b = box("c-days");
+  if (!b) return;
+  if (!days.some(d => d.heating_hours != null)) { b.el.innerHTML = '<div class="empty">Builds up day by day.</div>'; return; }
+  const {W, H} = b, L = 34, R = 6, T = 18, B = 26;
+  const max = Math.max(4, ...days.map(d => d.heating_hours || 0));
+  const ticks = niceTicks(0, max, 4), top = ticks[ticks.length - 1] < max ? max : ticks[ticks.length - 1];
+  const y = v => T + (top - v) / top * (H - T - B);
+  const slot = (W - L - R) / days.length, bw = Math.max(6, Math.min(28, slot - 6));
+  let bars = "", labels = "";
+  days.forEach((d, i) => {
+    const cx = L + slot * i + slot / 2;
+    const isToday = i === days.length - 1;
+    if (d.heating_hours != null && d.heating_hours > 0) {
+      const y0 = y(d.heating_hours), h = H - B - y0, r = Math.min(4, h / 2, bw / 2);
+      const x0 = cx - bw / 2;
+      bars += `<path d="M${x0},${H - B} V${y0 + r} Q${x0},${y0} ${x0 + r},${y0} H${x0 + bw - r} Q${x0 + bw},${y0} ${x0 + bw},${y0 + r} V${H - B} Z"
+        fill="var(--room)" opacity="${isToday ? 1 : .78}"/>`;
+    } else if (d.heating_hours == null) {
+      bars += `<line x1="${cx - bw / 2}" x2="${cx + bw / 2}" y1="${H - B - 1}" y2="${H - B - 1}" stroke="var(--line)" stroke-width="2" stroke-linecap="round"/>`;
+    }
+    bars += `<rect x="${L + slot * i}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent" data-i="${i}"/>`;
+    if (days.length <= 8 || i % 2 === (days.length - 1) % 2)
+      labels += `<text x="${cx}" y="${H - 8}" text-anchor="middle" ${isToday ? 'class="lbl" fill="var(--ink)"' : ""}>${isToday ? "Today" : d.label.split(" ")[0][0] + " " + d.label.split(" ")[1]}</text>`;
+  });
+  b.el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Hours of heating per day">
+    ${yGrid(ticks, y, L, W, R, "h")}${bars}${labels}</svg>`;
+  b.el.querySelectorAll("rect[data-i]").forEach(r => {
+    r.addEventListener("pointermove", e => {
+      const d = days[+r.dataset.i];
+      showTip(`<div class="t">${d.label}</div>${d.heating_hours == null ? "Not recorded" :
+        tipRow(css("--room"), "Heating on", hrs(d.heating_hours)) +
+        tipRow(css("--outside"), "Outside", d.outside_min == null ? "–" : `${fmt(d.outside_min)} to ${fmt(d.outside_max)}`)}`,
+        e.clientX, e.clientY);
+    });
+    r.addEventListener("pointerleave", hideTip);
+  });
+}
+
+// Forecast line with area
+function drawForecast(hours) {
+  const b = box("c-forecast");
+  if (!b) return;
+  if (!hours || hours.length < 2) { b.el.innerHTML = '<div class="empty">No forecast right now.</div>'; return; }
+  const {W, H} = b, L = 34, R = 10, T = 22, B = 26;
+  const vs = hours.map(h => h.outside);
+  const lo = Math.floor(Math.min(...vs) - 1), hi = Math.ceil(Math.max(...vs) + 1);
+  const t0 = hours[0].ts, t1 = hours[hours.length - 1].ts;
+  const x = t => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const path = hours.map((h, i) => `${i ? "L" : "M"}${x(h.ts).toFixed(1)},${y(h.outside).toFixed(1)}`).join("");
+  const area = `${path} L${x(t1)},${H - B} L${x(t0)},${H - B} Z`;
+  let xt = "";
+  hours.forEach(h => {
+    const hr = new Date(h.ts * 1000).getHours();
+    if (hr % 6 === 0) xt += `<text x="${x(h.ts)}" y="${H - 8}" text-anchor="middle">${String(hr).padStart(2, "0")}:00</text>`;
+  });
+  const iMin = vs.indexOf(Math.min(...vs)), iMax = vs.indexOf(Math.max(...vs));
+  const mark = (i, above) => `<circle cx="${x(hours[i].ts)}" cy="${y(vs[i])}" r="4" fill="var(--outside)" stroke="var(--card)" stroke-width="2"/>
+    <text class="lbl" x="${Math.min(W - R - 14, Math.max(L + 14, x(hours[i].ts)))}" y="${y(vs[i]) + (above ? -10 : 18)}" text-anchor="middle" fill="var(--ink)">${fmt(vs[i])}</text>`;
+  b.el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Outside temperature forecast">
+    <defs><linearGradient id="fg" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="var(--outside)" stop-opacity=".22"/><stop offset="1" stop-color="var(--outside)" stop-opacity="0"/></linearGradient></defs>
+    ${yGrid(niceTicks(lo, hi, 4), y, L, W, R, "°")}${xt}
+    <path d="${area}" fill="url(#fg)"/>
+    <path d="${path}" fill="none" stroke="var(--outside)" stroke-width="2" stroke-linejoin="round"/>
+    ${mark(iMax, true)}${iMin !== iMax ? mark(iMin, false) : ""}
+    <g id="fx" style="display:none"><line y1="${T}" y2="${H - B}" stroke="var(--faint)"/>
+      <circle r="4.5" fill="var(--outside)" stroke="var(--card)" stroke-width="2"/></g>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="fhit"/>
+  </svg>`;
+  const svg = b.el.querySelector("svg"), g = b.el.querySelector("#fx"), hit = b.el.querySelector("#fhit");
+  hit.addEventListener("pointermove", e => {
+    const rect = svg.getBoundingClientRect();
+    const t = t0 + ((e.clientX - rect.left) * W / rect.width - L) / (W - L - R) * (t1 - t0);
+    const h = hours.reduce((a, c) => Math.abs(c.ts - t) < Math.abs(a.ts - t) ? c : a);
+    g.style.display = "";
+    g.querySelector("line").setAttribute("x1", x(h.ts)); g.querySelector("line").setAttribute("x2", x(h.ts));
+    g.querySelector("circle").setAttribute("cx", x(h.ts)); g.querySelector("circle").setAttribute("cy", y(h.outside));
+    showTip(`<div class="t">${when(h.ts)}</div>${tipRow(css("--outside"), "Outside", fmt(h.outside))}`, e.clientX, e.clientY);
+  });
+  hit.addEventListener("pointerleave", () => { g.style.display = "none"; hideTip(); });
+}
+
+// Diverging colour for room temperature: cool blue, neutral around 19°, warm red
+function mix(a, b, t) {
+  const p = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * t)).join(",")})`;
+}
+function heatColour(v) {
+  const mid = 19, span = 4;
+  const t = Math.max(-1, Math.min(1, (v - mid) / span));
+  return t < 0 ? mix(css("--mid"), css("--cold"), -t) : mix(css("--mid"), css("--hot"), t);
+}
+
+function drawHeatmap(rows) {
+  const b = box("c-heatmap");
+  if (!b) return;
+  rows = rows.filter(r => r.hours.some(v => v != null));
+  if (!rows.length) { b.el.innerHTML = '<div class="empty">Fills in as days are recorded.</div>'; return; }
+  const W = b.W, L = 54, R = 4, T = 4, B = 22, gap = 2;
+  const cw = (W - L - R) / 24, ch = Math.max(14, Math.min(22, cw * 0.8));
+  const H = T + rows.length * ch + B;
+  let cells = "", labels = "";
+  rows.forEach((r, ri) => {
+    const yy = T + ri * ch;
+    labels += `<text x="${L - 8}" y="${yy + ch / 2 + 4}" text-anchor="end">${r.label}</text>`;
+    r.hours.forEach((v, h) => {
+      const xx = L + h * cw;
+      cells += v == null
+        ? `<rect x="${xx + gap / 2}" y="${yy + gap / 2}" width="${cw - gap}" height="${ch - gap}" rx="3" fill="none" stroke="var(--grid)"/>`
+        : `<rect x="${xx + gap / 2}" y="${yy + gap / 2}" width="${cw - gap}" height="${ch - gap}" rx="3" fill="${heatColour(v)}" data-r="${ri}" data-h="${h}"/>`;
+    });
+  });
+  for (let h = 0; h < 24; h += 3)
+    labels += `<text x="${L + h * cw + cw / 2}" y="${H - 6}" text-anchor="middle">${String(h).padStart(2, "0")}</text>`;
+  b.el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Average room temperature for each hour of each day">${cells}${labels}</svg>`;
+  b.el.querySelectorAll("rect[data-r]").forEach(c => {
+    c.addEventListener("pointermove", e => {
+      const r = rows[+c.dataset.r], h = +c.dataset.h;
+      showTip(`<div class="t">${r.label}, ${String(h).padStart(2, "0")}:00</div>${tipRow(heatColour(r.hours[h]), "Room", fmt(r.hours[h]))}`, e.clientX, e.clientY);
+    });
+    c.addEventListener("pointerleave", hideTip);
+  });
+}
+
+// Scatter: warm-up speed against outside temperature
+function drawWarmup(w) {
+  const b = box("c-warmup");
+  if (!b) return;
+  const {W, H} = b, L = 34, R = 10, T = 12, B = 30;
+  const xs = [-5, 20], top = Math.max(2.5, ...w.samples.map(s => s.rate), ...w.line.map(s => s.rate)) + 0.2;
+  const x = v => L + (v - xs[0]) / (xs[1] - xs[0]) * (W - L - R);
+  const y = v => T + (top - v) / top * (H - T - B);
+  const line = w.line.map((p, i) => `${i ? "L" : "M"}${x(p.outside).toFixed(1)},${y(p.rate).toFixed(1)}`).join("");
+  let xt = "";
+  for (let v = -5; v <= 20; v += 5) xt += `<text x="${x(v)}" y="${H - 12}" text-anchor="middle">${v}°</text>`;
+  const dots = w.samples.map((s, i) => `<circle cx="${x(Math.max(-5, Math.min(20, s.outside)))}" cy="${y(s.rate)}" r="5"
+      fill="var(--room)" stroke="var(--card)" stroke-width="2" data-i="${i}"/>`).join("");
+  b.el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Degrees per hour of warm-up against outside temperature">
+    ${yGrid(niceTicks(0, top, 4), y, L + 6, W, R, "°/h")}${xt}
+    <text x="${(L + W - R) / 2}" y="${H}" text-anchor="middle">outside temperature</text>
+    <path d="${line}" fill="none" stroke="var(--set)" stroke-width="2" ${w.learned ? "" : 'stroke-dasharray="5 4"'}/>
+    ${dots}
+  </svg>
+  <p class="sub" style="margin-top:6px">${w.learned
+    ? `Each dot is one warm-up: degrees gained per hour. The line is what it has learned.`
+    : `No warm-ups seen yet, so it assumes the dashed line. Dots appear as it learns.`}</p>`;
+  b.el.querySelectorAll("circle[data-i]").forEach(c => {
+    c.addEventListener("pointermove", e => {
+      const s = w.samples[+c.dataset.i];
+      showTip(`${tipRow(css("--room"), "Warmed", s.rate.toFixed(1) + "° an hour")}${tipRow(css("--outside"), "Outside", fmt(s.outside))}`, e.clientX, e.clientY);
+    });
+    c.addEventListener("pointerleave", hideTip);
+  });
+}
+
+// ---------- presets, smart heating, plan ----------
+function presetsHtml(d) {
+  const p = d.presets || {};
+  if (!state.editPresets) {
+    return `<div class="presets"><span>Home <b>${fmt(p.home)}</b> · Sleep <b>${fmt(p.sleep)}</b>
+      · Away <b>${fmt(p.away)}</b></span>
+      <button onclick="startPresets('${d.id}')">Edit</button></div>`;
+  }
+  const e = state.editPresets;
+  const row = (k, label) => `<span>${label}</span>
+    <button onclick="nudgePreset('${k}', -0.5)">−</button>
+    <span class="v">${e[k].toFixed(1)}°</span>
+    <button onclick="nudgePreset('${k}', 0.5)">+</button>`;
+  return `<div class="presets"><span>Edit presets</span></div>
+    <div class="pedit">${row("home", "Home")}${row("sleep", "Sleep")}${row("away", "Away")}</div>
+    <div class="row" style="margin-top:12px">
+      <button onclick="state.editPresets = null; render()">Cancel</button>
+      <button class="primary" onclick="savePresets('${d.id}')">Save presets</button>
+    </div>`;
+}
+function startPresets(id) {
+  const d = state.devices.find(x => x.id === id), p = d.presets || {};
+  state.editPresets = {home: p.home ?? 20, sleep: p.sleep ?? 16, away: p.away ?? 16};
+  render();
+}
+function nudgePreset(k, step) {
+  const v = Math.round((state.editPresets[k] + step) * 2) / 2;
+  state.editPresets[k] = Math.min(30, Math.max(5, v));
+  render();
+}
+async function savePresets(id) {
+  const e = state.editPresets;
+  state.editPresets = null;
+  await act(id, "presets", {home: e.home, sleep: e.sleep, away: e.away});
+}
+
+function smartHtml(d) {
+  const s = state.smart;
+  if (!s) return "";
+  const f = state.form;
+  const opt = (v, label) => `<option value="${v}" ${f.days === v ? "selected" : ""}>${label}</option>`;
+  const periods = s.periods.length
+    ? `<ul class="plan">${s.periods.map(p => `<li>
+        <span>${p.days_name}</span><span class="t"><b>${p.temp.toFixed(1)}°</b> ${p.ready}–${p.until}</span>
+        <button class="x" title="Remove" onclick="smart('delete', {id: ${p.id}})">×</button></li>`).join("")}</ul>`
+    : '<p class="sub" style="margin-top:10px">No warm periods yet. Add one below.</p>';
+  let status = "";
+  if (s.enabled) {
+    if (s.paused_until) {
+      status += `<div class="paused"><span>Stepped back until ${clock(s.paused_until)} after a change by hand</span>
+        <button class="smallbtn" onclick="smart('resume')">Resume</button></div>`;
+    }
+    if (s.note) {
+      const who = [s.note_who, s.note_ts ? clock(s.note_ts) : ""].filter(Boolean).join(" at ");
+      status += `<p class="note">${escapeHtml(s.note)}${who ? ` <span class="who">· ${escapeHtml(who)}</span>` : ""}</p>`;
+    }
+    if (s.learned) status += `<p class="sub">${escapeHtml(s.learned)}</p>`;
+  } else {
+    status = `<p class="sub">Set the times you want it warm. It learns how long the house takes to
+      warm up, checks the forecast and starts the heating at the right time.</p>`;
+  }
+  return `
+    <div class="card" style="--o:8">
+      <div class="head">
+        <p class="title">Smart heating</p>
+        <button class="toggle ${s.enabled ? "on" : ""}" onclick="smart('${s.enabled ? "disable" : "enable"}')">
+          ${s.enabled ? "On" : "Off"}</button>
+      </div>
+      ${status}
+      ${periods}
+      <div class="addform">
+        <label>Days<select onchange="state.form.days = this.value">
+          ${opt("every", "Every day")}${opt("weekdays", "Weekdays")}${opt("weekends", "Weekends")}</select></label>
+        <label>Temperature<input type="number" step="0.5" min="10" max="24" value="${f.temp}"
+          oninput="state.form.temp = parseFloat(this.value)"></label>
+        <label>Warm by<input type="time" value="${f.ready}" oninput="state.form.ready = this.value"></label>
+        <label>Until<input type="time" value="${f.until}" oninput="state.form.until = this.value"></label>
+        <button onclick="smart('add', state.form)">Add warm period</button>
+      </div>
+      <div class="divider"></div>
+      <p class="section">Weather rules, judged on the forecast for the warm-by time</p>
+      ${s.rules.length ? `<ul class="rules">${s.rules.map(r => `<li><span>${escapeHtml(r.text)}</span>
+          <button class="x" title="Remove" onclick="smart('delete_rule', {id: ${r.id}})">×</button></li>`).join("")}</ul>`
+        : '<p class="sub">No weather rules yet.</p>'}
+      ${ruleFormHtml()}
+      <p class="sub" style="margin-top:12px">Thinking: ${escapeHtml(s.brain)}</p>
+    </div>`;
+}
+
+function ruleFormHtml() {
+  const r = state.ruleForm;
+  const sel = (v, cur) => v === cur ? "selected" : "";
+  return `<div class="ruleform">
+    <select oninput="state.ruleForm.when = this.value">
+      <option value="at_or_above" ${sel("at_or_above", r.when)}>Outside at or above</option>
+      <option value="at_or_below" ${sel("at_or_below", r.when)}>Outside at or below</option></select>
+    <input type="number" step="0.5" value="${r.outside}" oninput="state.ruleForm.outside = parseFloat(this.value)" aria-label="Outside °C">
+    <select oninput="state.ruleForm.rule_action = this.value; render()">
+      <option value="skip" ${sel("skip", r.rule_action)}>No warm-up</option>
+      <option value="adjust" ${sel("adjust", r.rule_action)}>Change temperature by</option></select>
+    <input type="number" step="0.5" value="${r.amount}" ${r.rule_action === "skip" ? "disabled" : ""}
+      oninput="state.ruleForm.amount = parseFloat(this.value)" aria-label="Change by °C">
+    <button onclick="smart('add_rule', state.ruleForm)">Add weather rule</button>
+  </div>`;
+}
+
+function planFromDataHtml(d) {
+  const s = state.smart;
+  if (!s) return "";
+  const days = s.days_recorded || 0;
+  const g = s.suggestion;
+  let body;
+  if (state.thinking) {
+    body = '<p class="note">Looking through your data… this can take up to a minute.</p>';
+  } else if (g) {
+    body = `<div class="suggest">
+      <h3>What it sees · ${escapeHtml(g.who)}, from ${g.days_of_data} days</h3>
+      <p style="margin:0">${escapeHtml(g.summary)}</p>
+      <h3>Warm periods</h3>
+      ${g.periods.length ? `<ul>${g.periods.map(p => `<li><b>${p.days_name} ${p.temp.toFixed(1)}°</b>
+         ${p.ready}–${p.until} <span class="why">${escapeHtml(p.why)}</span></li>`).join("")}</ul>` : "<p class='why'>None suggested</p>"}
+      <h3>Weather rules</h3>
+      ${g.weather_rules.length ? `<ul>${g.weather_rules.map(r => `<li><b>${escapeHtml(r.text)}</b>
+         <span class="why">${escapeHtml(r.why)}</span></li>`).join("")}</ul>` : "<p class='why'>None suggested</p>"}
+      ${g.tips.length ? `<h3>Tips</h3><ul>${g.tips.map(t => `<li>${escapeHtml(t)}</li>`).join("")}</ul>` : ""}
+      <div class="row" style="margin-top:14px">
+        <button onclick="smart('dismiss_suggestion')">Dismiss</button>
+        <button class="primary" onclick="useSuggestion()">Use this plan</button>
+      </div>
+    </div>`;
+  } else {
+    body = `
+      <p class="sub">Leave your ESi schedule running as normal while the dashboard records.
+        After a few days, the AI looks at how your house actually behaves and suggests
+        warm periods and weather rules.</p>
+      <textarea placeholder="Anything it should know? e.g. at work Mon–Fri 8 till 5, home all weekend, like it warm in the evening"
+        oninput="state.extra = this.value">${escapeHtml(state.extra)}</textarea>
+      <button class="${days >= 3 ? "primary" : ""}" style="width:100%" onclick="suggest()">Suggest a plan</button>`;
+  }
+  return `<div class="card" style="--o:8">
+    <div class="head"><p class="title">Plan from your data</p>
+      <span class="sub" style="margin:0">${days.toFixed(1)} days recorded</span></div>
+    ${days < 3 && !g ? `<p class="sub">Best after 3 days or more.</p>` : ""}
+    ${body}
+  </div>`;
+}
+
+async function suggest() {
+  state.thinking = true; render();
+  try { await smart("suggest", {extra: state.extra}); }
+  finally { state.thinking = false; render(); }
+}
+function useSuggestion() {
+  if (!confirm("Replace your warm periods and weather rules with this plan?")) return;
+  smart("use_suggestion");
+}
+
+// ---------- talking to the dashboard ----------
+function nudge(id, step) {
+  const v = Math.round((state.chosen[id] + step) * 2) / 2;
+  state.chosen[id] = Math.min(30, Math.max(5, v));
+  render();
+}
+function message(text, isError) {
+  $("msg").textContent = text;
+  $("msg").className = "msg" + (isError ? " err" : "");
+}
+function setBusy(busy) { document.querySelectorAll("#app button").forEach(b => b.disabled = busy); }
+function stamp() { $("updated").textContent = "Updated " + clock(Date.now() / 1000); }
+
+function apply(data) {
+  if (data.smart) state.smart = data.smart;
+  if (data.devices) state.devices = data.devices;
+  if ("outside" in data) state.outside = data.outside;
+  if (data.activity) state.activity = data.activity;
+  if (data.now) state.skew = data.now - Date.now() / 1000;
+}
+
+async function getJSON(url, opts) {
+  const r = await fetch(url, opts);
+  const data = await r.json();
+  if (data.need_pin) { showPin(); throw new Error("PIN needed"); }
+  if (!data.ok) throw new Error(data.error);
+  return data;
+}
+
+async function smart(action, extra = {}) {
+  setBusy(true);
+  try {
+    const id = state.devices[0] ? state.devices[0].id : "";
+    const data = await getJSON(`/api/smart?device_id=${encodeURIComponent(id)}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({action, ...extra})});
+    state.smart = data.smart;
+    render();
+    message("");
+    if (["enable", "resume", "add"].includes(action)) setTimeout(load, 4000);
+  } catch (e) {
+    if (e.message !== "PIN needed") message(e.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function loadHistory() {
+  const d = state.devices[0];
+  if (!d) return;
+  try {
+    const data = await getJSON(`/api/history?device_id=${encodeURIComponent(d.id)}&hours=${state.range}`);
+    state.history[d.id] = data.points;
+    drawHistory(data.points);
+  } catch (e) { /* the main load shows errors */ }
+}
+
+async function loadInsights() {
+  const d = state.devices[0];
+  if (!d) return;
+  try {
+    state.insights = await getJSON(`/api/insights?device_id=${encodeURIComponent(d.id)}`);
+    const tiles = document.querySelector(".tiles");
+    if (tiles) tiles.innerHTML = tilesHtml(d);
+    drawCharts();
+  } catch (e) { /* the main load shows errors */ }
+}
+
+function setRange(hours) {
+  state.range = hours;
+  state.history = {};
+  render();
+  loadHistory();
+}
+
+function typing() {
+  const a = document.activeElement;
+  return a && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName);
+}
+
+async function load() {
+  try {
+    apply(await getJSON("/api/status"));
+    if (!typing()) render();
+    stamp();
+    if ($("msg").classList.contains("err")) message("");
+    loadHistory();
+    loadInsights();
+  } catch (e) {
+    if (e.message !== "PIN needed") message("Couldn't reach the thermostat: " + e.message, true);
+  }
+}
+
+async function act(id, action, extra = {}) {
+  if (action === "off" && !confirm("Turn the heating off?")) return;
+  const body = { device_id: id, action, temp: state.chosen[id], ...extra };
+  setBusy(true); message("Sending…");
+  try {
+    const data = await getJSON("/api/action", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)
+    });
+    apply(data);
+    render(); stamp();
+    message(data.done + (data.warning ? " (couldn't refresh: " + data.warning + ")" : ""));
+    loadHistory();
+  } catch (e) {
+    if (e.message !== "PIN needed") { message(e.message, true); load(); }
+  } finally {
+    setBusy(false);
+  }
+}
+
+// Boost countdown between refreshes
+setInterval(() => {
+  document.querySelectorAll("[data-boost]").forEach(el => {
+    const d = state.devices.find(x => x.id === el.dataset.boost);
+    if (d) el.textContent = boostText(d);
+  });
+}, 20000);
+
+// Redraw charts when the window changes size or the light/dark setting flips
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawCharts, 150); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => drawCharts());
+
+load();
+setInterval(() => { if (!state.locked) load(); }, 60000);
+</script>
+</body>
+</html>
