@@ -62,6 +62,9 @@ def test_status_page_and_icons():
         assert (await client.get("/")).status == 200
         assert (await client.get("/manifest.webmanifest")).status == 200
         assert (await client.get("/static/icon-192.png")).status == 200
+        logo = await client.get("/static/logo.svg")
+        assert logo.status == 200 and logo.headers["Content-Type"] == "image/svg+xml"
+        assert (await client.get("/static/..%2Fheating_config.ini")).status == 404
         assert (await client.get("/favicon.ico")).status == 200
     run("", check)
 
