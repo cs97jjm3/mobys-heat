@@ -183,3 +183,9 @@ def test_failure_reasons_are_kept_per_request():
     problems = []
     assert asyncio.run(ai.ask(None, "p", sh.parse_plan, problems=problems)) is None
     assert "Gemini didn't answer" in problems[0] and "Claude replied" in problems[1]
+
+
+def test_blank_order_still_uses_both():
+    # the settings loader passes "" when there's no order line in the file
+    ai = sh.AiAdvisor({"order": "", "gemini_api_key": "x", "claude_api_key": "y"})
+    assert ai.providers() == ["gemini", "claude"]

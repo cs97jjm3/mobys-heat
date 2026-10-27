@@ -165,7 +165,7 @@ class AiAdvisor:
         return bool(self.config.get("gemini_api_key") or self.config.get("claude_api_key"))
 
     def providers(self):
-        order = [p.strip().lower() for p in self.config.get("order", "gemini, claude").split(",")]
+        order = [p.strip().lower() for p in (self.config.get("order") or "gemini, claude").split(",")]
         return [p for p in order if self.config.get(f"{p}_api_key")]
 
     def _under_cap(self):
