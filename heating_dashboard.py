@@ -607,6 +607,8 @@ async def api_smart(request):
         elif action == "suggest":
             device_id = request.query.get("device_id", "")
             await planner.suggest_plan(device_id, body.get("extra", ""))
+        elif action == "takeover":
+            planner.set_takeover(bool(body.get("on")), body.get("background"))
         elif action == "use_suggestion":
             planner.use_suggestion()
         elif action == "dismiss_suggestion":
@@ -615,7 +617,8 @@ async def api_smart(request):
             raise ValueError(f"Unknown action: {action}")
     except (ValueError, TypeError) as err:
         return web.json_response({"ok": False, "error": str(err)}, status=400)
-    if action in ("enable", "resume", "add", "delete", "add_rule", "delete_rule", "use_suggestion"):
+    if action in ("enable", "disable", "resume", "add", "delete", "add_rule", "delete_rule",
+                  "use_suggestion", "takeover"):
         asyncio.create_task(safe_tick(planner))   # react straight away
     return web.json_response({"ok": True, "smart": planner.summary(request.query.get("device_id"))})
 
@@ -654,6 +657,7 @@ def build_app(heating, store, pin, ai_config=None):
     async def on_cleanup(app):
         app[JOBS]["history"].cancel()
         app[JOBS]["smart"].cancel()
+        await app[PLANNER].shutdown()
         await heating.stop()
 
     app.on_startup.append(on_startup)

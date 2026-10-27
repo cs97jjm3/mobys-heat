@@ -21,6 +21,12 @@ back to its own ESi schedule within the hour.
 
 If you change the heating by hand (on the dashboard or in the ESi app),
 smart heating steps back until the end of that warm period.
+
+Full control (optional): instead of handing back to the ESi schedule between
+warm periods, the dashboard holds a low "background" temperature itself, so
+the ESi app's schedule isn't needed at all. If the dashboard stops, the
+thermostat simply stays at that background temperature. Closing the dashboard
+properly (Ctrl+C) hands the heating back to the ESi schedule.
 """
 
 import asyncio
@@ -32,6 +38,10 @@ from datetime import datetime, timedelta
 
 MODE_SCHEDULE = "0"
 MODE_BOOST = "3"
+MODE_OFF = "4"
+MODE_MANUAL = "5"
+DEFAULT_BACKGROUND = 16.0
+MIN_BACKGROUND, MAX_BACKGROUND = 10.0, 20.0
 
 CHECK_EVERY_MINUTES = 5        # how often the planner looks at things
 EARLIEST_START_HOURS = 3       # never start warming more than this early
@@ -637,11 +647,29 @@ class Planner:
             self._set("our_boost", None)
         self._note("Smart heating switched on" if on else "Smart heating is off")
 
+    @property
+    def takeover(self):
+        return bool(self._get("takeover", False))
+
+    @property
+    def background(self):
+        return float(self._get("background", DEFAULT_BACKGROUND))
+
+    def set_takeover(self, on, background=None):
+        if background is not None and str(background).strip() != "":
+            bg = round(float(background) * 2) / 2
+            if not MIN_BACKGROUND <= bg <= MAX_BACKGROUND:
+                raise ValueError(f"Background should be between {MIN_BACKGROUND:g} and {MAX_BACKGROUND:g}")
+            self._set("background", bg)
+        self._set("takeover", bool(on))
+        self._note(f"Full control on: {self.background:.1f}° between warm periods" if on
+                   else "Full control off: your ESi schedule runs between warm periods")
+
     def pause_after_manual(self, action=None):
         """You changed it by hand, so step back until the current/next warm period ends."""
         if not self.enabled:
             return
-        if action == "schedule" and not self._get("our_boost"):
+        if action == "schedule" and not self._get("our_boost") and not self.takeover:
             return   # back to schedule when we weren't doing anything: nothing to step back from
         now = time.time()
         upcoming = self.occurrences(now)
@@ -649,6 +677,7 @@ class Planner:
             else now + 3 * 3600
         self._set("paused_until", until)
         self._set("our_boost", None)
+        self._set("our_hold", None)
         self._note(f"Stepped back until {friendly_when(until, now)} because the heating was changed by hand")
 
     def resume(self):
@@ -708,7 +737,8 @@ class Planner:
             await asyncio.sleep(CHECK_EVERY_MINUTES * 60)
 
     async def tick(self, now=None):
-        if not self.enabled:
+        hold = self._get("our_hold")       # the background temperature we're holding, with full control
+        if not self.enabled and hold is None:
             return
         now = now or time.time()
         devices = await self.heating.status()
@@ -717,14 +747,35 @@ class Planner:
         dev = devices[0]
         device_id, mode, room = dev["id"], dev["mode"], dev["room"]
         ours = self._get("our_boost")      # {"ends": ts, "temp": t} when we're boosting
+        holding = hold is not None and self._is_our_hold(dev, hold)
+        if hold is None and self.enabled and self.takeover and self._is_our_hold(dev, self.background):
+            # Already sitting at the background temperature (e.g. after a restart): that's ours
+            hold, holding = self.background, True
+            self._set("our_hold", hold)
+
+        # Full control switched off (or smart heating off): give the heating back to the ESi schedule
+        if hold is not None and not (self.enabled and self.takeover):
+            if holding or mode == MODE_BOOST:
+                await self.heating.set_mode(device_id, MODE_SCHEDULE)
+                self.store.log(device_id, "Smart: full control off, back to the ESi schedule")
+            self._set("our_hold", None)
+            if not self.enabled:
+                return
+            hold, holding = None, False
+
         outside = await self.heating.outside_temp()
         self.last_outside = outside
 
         if self._get("paused_until", 0) > now:
             return
 
-        # If someone set the heating by hand (Off, Hold, or a boost we didn't start), leave it be
-        if mode not in (MODE_SCHEDULE, MODE_BOOST) or (mode == MODE_BOOST and not ours):
+        # Has someone set the heating by hand (Off, Hold, or a boost we didn't start)?
+        ok_modes = (MODE_SCHEDULE, MODE_BOOST)
+        if mode not in ok_modes and not holding or (mode == MODE_BOOST and not ours):
+            if self.takeover and mode != MODE_OFF:
+                # With full control, step back for a while, then take over again
+                self.pause_after_manual()
+                return
             if ours:
                 self._set("our_boost", None)
             self._note(f"Leaving it alone: the heating is on {dev['mode_name']}, set by hand")
@@ -733,6 +784,10 @@ class Planner:
             # Our boost ended or was cancelled in the app
             ours = None
             self._set("our_boost", None)
+
+        # Full control: between warm periods, hold the background temperature
+        if self.takeover and not ours and not holding:
+            await self._hold_background(device_id)
 
         upcoming = self.occurrences(now)
         if not upcoming:
@@ -762,7 +817,7 @@ class Planner:
             return
 
         # The ESi schedule is already asking for this much or more: nothing to add
-        if (not ours and mode == MODE_SCHEDULE and dev["target"] is not None
+        if (not self.takeover and not ours and mode == MODE_SCHEDULE and dev["target"] is not None
                 and dev["target"] >= temp):
             if ready - EARLIEST_START_HOURS * 3600 <= now < until:
                 self._note(f"Your ESi schedule already has it at {dev['target']:.1f}°, "
@@ -859,10 +914,41 @@ class Planner:
             self._set("our_boost", {"ends": now + 3600, "temp": temp})
 
     async def _hand_back(self, device_id, why):
+        if self.takeover:
+            self._set("our_boost", None)
+            await self._hold_background(device_id, why)
+            return
         await self.heating.set_mode(device_id, MODE_SCHEDULE)
         self._set("our_boost", None)
         self._note(f"{why}, back to the ESi schedule")
         self.store.log(device_id, f"Smart: {why}, back to the ESi schedule")
+
+    async def _hold_background(self, device_id, why=None):
+        bg = self.background
+        await self.heating.manual(device_id, bg)
+        self._set("our_hold", bg)
+        text = f"{why}, back to {bg:.1f}°" if why else f"Holding the background {bg:.1f}°"
+        self._note(text)
+        self.store.log(device_id, f"Smart: {text}")
+
+    @staticmethod
+    def _is_our_hold(dev, hold):
+        return (dev["mode"] == MODE_MANUAL and dev.get("target") is not None
+                and abs(dev["target"] - hold) < 0.3)
+
+    async def shutdown(self):
+        """The dashboard is closing: hand the heating back to the ESi schedule if we were holding it."""
+        if self._get("our_hold") is None and not self._get("our_boost"):
+            return
+        try:
+            devices = await asyncio.wait_for(self.heating.status(), 20)
+            if devices:
+                await asyncio.wait_for(self.heating.set_mode(devices[0]["id"], MODE_SCHEDULE), 20)
+                self.store.log(devices[0]["id"], "Smart: dashboard closing, back to the ESi schedule")
+        except Exception as err:
+            print(f"Smart heating: couldn't hand back to the ESi schedule ({err})")
+        self._set("our_hold", None)
+        self._set("our_boost", None)
 
     # ----- for the page -----
     def summary(self, device_id=None):
@@ -879,6 +965,8 @@ class Planner:
         providers = self.ai.providers()
         return {
             "enabled": self.enabled,
+            "takeover": self.takeover,
+            "background": self.background,
             "paused_until": self._get("paused_until", 0) if self._get("paused_until", 0) > now else 0,
             "note": note.get("text", ""),
             "note_ts": note.get("ts"),

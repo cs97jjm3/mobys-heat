@@ -15,7 +15,7 @@ It shows how warm the house is, how warm it is outside, and how the two have mov
 - **Live view**: room temperature on a dial, what it's set to, the outside temperature, the mode, a boost countdown and a low battery warning.
 - **Controls**: boost for 1, 2 or 3 hours, hold a temperature, back to schedule, off, and edit the home / sleep / away presets.
 - **History**: a reading every 5 minutes, kept for 90 days. Charts for temperature over time, hours of heating per day, a 24-hour outside forecast, room temperature by hour of day, and how fast the house warms up.
-- **Smart heating** (optional, off until you switch it on): you set when you want it warm, for example "weekdays, 20° from 06:30 until 08:30". It learns how fast the house warms up, and how much slower that is in the cold, then decides when to start. Weather rules can skip a warm-up on a mild day or add a little when it's freezing.
+- **Smart heating** (optional, off until you switch it on): you set when you want it warm, for example "weekdays, 20° from 06:30 until 08:30". It learns how fast the house warms up, and how much slower that is in the cold, then decides when to start. Weather rules can skip a warm-up on a mild day or add a little when it's freezing. You can also let it take **full control**: between warm periods it holds a low background temperature you choose, so you never need the ESi app's schedule. You can also ask it questions about your heating, and ask it to suggest a plan from what it has recorded.
 - **Plan from your data**: after a few days of recording, an AI looks at how your house actually behaves and suggests warm periods and weather rules. You decide whether to use them.
 - **Works on a phone** and installs to the home screen with its own icon. Light and dark themes follow your device.
 - **Your own web address** (optional) through a Cloudflare tunnel, protected by a PIN, with nothing opened on your router.
@@ -24,7 +24,7 @@ It shows how warm the house is, how warm it is outside, and how the two have mov
 
 The code sets the limits and the AI only chooses the timing within them. It never starts more than 3 hours early, never heats above the temperature you set, and if the AI keeps saying "wait" past the last sensible moment, plain rules start the heating anyway. If neither AI answers, the rules decide on their own.
 
-It drives the heating with 1-hour boosts that it tops up. If the computer running Moby's Heat stops, or the internet drops, the boost runs out and the thermostat goes back to its own ESi schedule within the hour. If someone changes the heating by hand, on the dashboard or in the ESi app, smart heating steps back until that warm period is over.
+It drives the heating with 1-hour boosts that it tops up. If the computer running Moby's Heat stops, or the internet drops, the boost runs out and the thermostat goes back to its own ESi schedule within the hour. If someone changes the heating by hand, on the dashboard or in the ESi app, smart heating steps back until that warm period is over. With full control on, the thermostat sits at your background temperature between warm periods, so if the computer stops, the house stays at that temperature rather than getting stuck warm. Turning the heating Off by hand is always left alone, and closing Moby's Heat with Ctrl+C hands the heating back to your ESi schedule.
 
 ## Setting it up
 

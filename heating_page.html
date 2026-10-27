@@ -825,6 +825,8 @@ function smartHtml(d) {
         <button onclick="smart('add', state.form)">Add warm period</button>
       </div>
       <div class="divider"></div>
+      ${betweenHtml(s)}
+      <div class="divider"></div>
       <p class="section">Weather rules, judged on the forecast for the warm-by time</p>
       ${s.rules.length ? `<ul class="rules">${s.rules.map(r => `<li><span>${escapeHtml(r.text)}</span>
           <button class="x" title="Remove" onclick="smart('delete_rule', {id: ${r.id}})">×</button></li>`).join("")}</ul>`
@@ -832,6 +834,31 @@ function smartHtml(d) {
       ${ruleFormHtml()}
       <p class="sub" style="margin-top:12px">Thinking: ${escapeHtml(s.brain)}</p>
     </div>`;
+}
+
+function betweenHtml(s) {
+  if (state.bg == null) state.bg = s.background;
+  const choice = state.bgChoice ?? (s.takeover ? "dashboard" : "esi");
+  const changed = (choice === "dashboard") !== s.takeover || (choice === "dashboard" && state.bg !== s.background);
+  return `<p class="section">Between warm periods</p>
+    <div class="ruleform">
+      <select onchange="state.bgChoice = this.value; render()" aria-label="Between warm periods">
+        <option value="esi" ${choice === "esi" ? "selected" : ""}>Use my ESi schedule</option>
+        <option value="dashboard" ${choice === "dashboard" ? "selected" : ""}>This dashboard holds (°C)</option></select>
+      ${choice === "dashboard" ? `<input type="number" step="0.5" min="10" max="20" value="${state.bg}"
+        oninput="state.bg = parseFloat(this.value); render()" aria-label="Background °C">` : ""}
+      ${changed ? `<button class="primary" onclick="saveBetween()">Save</button>` : ""}
+    </div>
+    <p class="sub">${s.takeover
+      ? `The dashboard runs the heating: ${s.background.toFixed(1)}° between warm periods, so the ESi app's schedule isn't used.
+         If this PC is off, the house stays at ${s.background.toFixed(1)}°. Closing the dashboard properly hands back to your ESi schedule.`
+      : "Your own ESi schedule runs the heating outside the warm periods."}
+      ${s.takeover && !s.enabled ? " <b>Switch smart heating on (top of this card) for this to start.</b>" : ""}</p>`;
+}
+async function saveBetween() {
+  const on = (state.bgChoice ?? (state.smart.takeover ? "dashboard" : "esi")) === "dashboard";
+  await smart("takeover", {on, background: state.bg});
+  state.bgChoice = null; state.bg = null; render();
 }
 
 function ruleFormHtml() {
@@ -941,7 +968,7 @@ async function smart(action, extra = {}) {
     state.smart = data.smart;
     render();
     message("");
-    if (["enable", "resume", "add"].includes(action)) setTimeout(load, 4000);
+    if (["enable", "resume", "add", "takeover"].includes(action)) setTimeout(load, 4000);
   } catch (e) {
     if (e.message !== "PIN needed") message(e.message, true);
   } finally {

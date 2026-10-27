@@ -189,3 +189,119 @@ def test_blank_order_still_uses_both():
     # the settings loader passes "" when there's no order line in the file
     ai = sh.AiAdvisor({"order": "", "gemini_api_key": "x", "claude_api_key": "y"})
     assert ai.providers() == ["gemini", "claude"]
+
+
+# ----- full control: the dashboard holds a background temperature between warm periods -----
+
+class FakeHeat:
+    def __init__(self, mode="0", target=19.0, room=18.0):
+        self.dev = {"id": "d1", "mode": mode, "mode_name": "x", "target": target, "room": room}
+        self.calls = []
+        self.weather = (8.0, 0)
+        self.web = None
+
+    async def status(self):
+        return [dict(self.dev)]
+
+    async def outside_temp(self):
+        return 8.0
+
+    async def manual(self, device_id, celsius):
+        self.calls.append(("manual", celsius))
+        self.dev.update(mode="5", target=celsius)
+
+    async def boost(self, device_id, celsius, hours):
+        self.calls.append(("boost", celsius))
+        self.dev.update(mode="3", target=celsius)
+
+    async def set_mode(self, device_id, mode):
+        self.calls.append(("mode", mode))
+        self.dev.update(mode=mode)
+
+
+def full_planner(heating, tmp_path):
+    store = hd.Store(tmp_path / "h.db")
+    p = sh.Planner(heating, store, {})
+    p.set_enabled(True)
+    return p
+
+
+def at_hour(hour, minute=0):
+    return datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0).timestamp()
+
+
+def test_full_control_holds_the_background_between_warm_periods(tmp_path):
+    heat = FakeHeat()
+    p = full_planner(heat, tmp_path)
+    p.add_period("every", "19:00", "22:00", 20)
+    p.set_takeover(True, 16)
+    asyncio.run(p.tick(at_hour(12)))
+    assert heat.calls == [("manual", 16.0)]
+    asyncio.run(p.tick(at_hour(12, 5)))               # already holding: no more calls
+    assert heat.calls == [("manual", 16.0)]
+
+
+def test_full_control_warms_then_drops_back(tmp_path):
+    heat = FakeHeat(mode="5", target=16.0, room=19.8)
+    p = full_planner(heat, tmp_path)
+    p.add_period("every", "19:00", "22:00", 20)
+    p.set_takeover(True, 16)
+    p._set("our_hold", 16.0)
+    asyncio.run(p.tick(at_hour(20)))                  # in the warm period: boost to 20
+    assert heat.calls[-1] == ("boost", 20.0)
+    asyncio.run(p.tick(at_hour(21, 58)))              # end of the period: back to the background
+    assert heat.calls[-1] == ("manual", 16.0)
+
+
+def test_switching_full_control_off_hands_back_to_the_schedule(tmp_path):
+    heat = FakeHeat(mode="5", target=16.0)
+    p = full_planner(heat, tmp_path)
+    p.set_takeover(True, 16)
+    p._set("our_hold", 16.0)
+    p.set_takeover(False)
+    asyncio.run(p.tick(at_hour(12)))
+    assert ("mode", "0") in heat.calls and p._get("our_hold") is None
+
+
+def test_a_change_by_hand_is_respected_with_full_control(tmp_path):
+    heat = FakeHeat(mode="5", target=22.0)    # someone held 22 in the ESi app
+    p = full_planner(heat, tmp_path)
+    p.add_period("every", "19:00", "22:00", 20)
+    p.set_takeover(True, 16)
+    p._set("our_hold", 16.0)
+    asyncio.run(p.tick(at_hour(12)))
+    assert heat.calls == [] and p._get("paused_until", 0) > at_hour(12)
+
+
+def test_heating_off_by_hand_stays_off(tmp_path):
+    heat = FakeHeat(mode="4", target=None)
+    p = full_planner(heat, tmp_path)
+    p.set_takeover(True, 16)
+    asyncio.run(p.tick(at_hour(12)))
+    assert heat.calls == []
+
+
+def test_closing_the_dashboard_hands_back(tmp_path):
+    heat = FakeHeat(mode="5", target=16.0)
+    p = full_planner(heat, tmp_path)
+    p.set_takeover(True, 16)
+    p._set("our_hold", 16.0)
+    asyncio.run(p.shutdown())
+    assert heat.calls == [("mode", "0")]
+
+
+def test_background_must_be_sensible(tmp_path):
+    p = full_planner(FakeHeat(), tmp_path)
+    try:
+        p.set_takeover(True, 25)
+        assert False
+    except ValueError:
+        pass
+
+
+def test_already_at_the_background_counts_as_ours(tmp_path):
+    heat = FakeHeat(mode="5", target=16.0)
+    p = full_planner(heat, tmp_path)
+    p.set_takeover(True, 16)
+    asyncio.run(p.tick(at_hour(12)))
+    assert heat.calls == [] and not p._get("paused_until", 0) and p._get("our_hold") == 16.0
