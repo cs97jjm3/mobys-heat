@@ -862,7 +862,7 @@ function planFromDataHtml(d) {
   } else if (g) {
     body = `<div class="suggest">
       <h3>What it sees · ${escapeHtml(g.who)}, from ${g.days_of_data} days</h3>
-      <p style="margin:0">${escapeHtml(g.summary)}</p>
+      <p style="margin:0; white-space:pre-line">${escapeHtml(g.summary)}</p>
       <h3>Warm periods</h3>
       ${g.periods.length ? `<ul>${g.periods.map(p => `<li><b>${p.days_name} ${p.temp.toFixed(1)}°</b>
          ${p.ready}–${p.until} <span class="why">${escapeHtml(p.why)}</span></li>`).join("")}</ul>` : "<p class='why'>None suggested</p>"}
@@ -872,7 +872,7 @@ function planFromDataHtml(d) {
       ${g.tips.length ? `<h3>Tips</h3><ul>${g.tips.map(t => `<li>${escapeHtml(t)}</li>`).join("")}</ul>` : ""}
       <div class="row" style="margin-top:14px">
         <button onclick="smart('dismiss_suggestion')">Dismiss</button>
-        <button class="primary" onclick="useSuggestion()">Use this plan</button>
+        ${g.periods.length || g.weather_rules.length ? `<button class="primary" onclick="useSuggestion()">Use this plan</button>` : ""}
       </div>
     </div>`;
   } else {
@@ -880,7 +880,7 @@ function planFromDataHtml(d) {
       <p class="sub">Leave your ESi schedule running as normal while the dashboard records.
         After a few days, the AI looks at how your house actually behaves and suggests
         warm periods and weather rules.</p>
-      <textarea placeholder="Anything it should know? e.g. at work Mon–Fri 8 till 5, home all weekend, like it warm in the evening"
+      <textarea placeholder="Anything it should know, or a question? e.g. at work Mon–Fri 8 till 5, like it warm in the evening. Or: what have you learnt about our heating?"
         oninput="state.extra = this.value">${escapeHtml(state.extra)}</textarea>
       <button class="${days >= 3 ? "primary" : ""}" style="width:100%" onclick="suggest()">Suggest a plan</button>`;
   }

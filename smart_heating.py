@@ -159,6 +159,7 @@ class AiAdvisor:
         self.config = config
         self.calls_today = 0
         self.calls_day = None
+        self.last_problem = None
 
     @property
     def available(self):
@@ -179,9 +180,12 @@ class AiAdvisor:
         Ask each AI in turn until one gives an answer that check() can read.
         Returns (answer, who) or None.
         """
+        self.last_problem = None
         if not self._under_cap():
             print("Smart heating: daily AI limit reached, using the rules")
+            self.last_problem = "the daily limit of AI questions has been reached"
             return None
+        problems = []
         for provider in self.providers():
             try:
                 self.calls_today += 1
@@ -195,8 +199,11 @@ class AiAdvisor:
                 if answer:
                     return answer, provider.capitalize()
                 print(f"Smart heating: {provider} gave an answer I couldn't read: {text[:200]}")
+                problems.append(f"{provider.capitalize()} replied but not in the shape needed")
             except Exception as err:
                 print(f"Smart heating: {provider} didn't answer ({err})")
+                problems.append(f"{provider.capitalize()} didn't answer ({friendly_error(err)})")
+        self.last_problem = "; ".join(problems) or None
         return None
 
     async def decide(self, session, facts):
@@ -213,7 +220,8 @@ class AiAdvisor:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2,
+                                 "maxOutputTokens": 4000},
         }
         headers = {"x-goog-api-key": self.config["gemini_api_key"]}
         async with session.post(url, json=body, headers=headers) as r:
@@ -237,6 +245,22 @@ class AiAdvisor:
             if r.status != 200:
                 raise RuntimeError(f"HTTP {r.status} {str(data)[:150]}")
         return "".join(part.get("text", "") for part in data["content"])
+
+
+def friendly_error(err):
+    """Turn an API error into a few plain words."""
+    text = str(err)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text:
+        return "too many requests, or the free allowance is used up for today"
+    if "401" in text or "403" in text or "API_KEY" in text or "authentication" in text.lower():
+        return "the key wasn't accepted"
+    if "404" in text or "not_found" in text.lower():
+        return "the model name wasn't recognised"
+    if "credit" in text.lower() or "billing" in text.lower():
+        return "out of credit"
+    if "529" in text or "503" in text or "overloaded" in text.lower():
+        return "it's busy, try again shortly"
+    return err.__class__.__name__ if not text else text[:80]
 
 
 def parse_answer(text):
@@ -299,13 +323,17 @@ Aim for comfort when they're up and about, and not wasting gas when they're not.
 Keep it simple: a few warm periods and a few weather rules. Base it on what the
 data actually shows, and say so if there isn't much data yet.
 
+If the homeowner asks a question, answer it plainly in the summary (up to 8
+sentences), and still fill in the plan. If you think their current plan is
+already right, repeat it as the plan.
+
 {extra}
 The data (temperatures in °C, times are local UK time):
 {facts}
 
 Reply with JSON only, no other text, in exactly this shape:
 {{
-  "summary": "2 to 4 plain-English sentences on what you can see in their current setup",
+  "summary": "2 to 4 plain-English sentences on what you can see in their current setup, plus the answer to any question they asked",
   "periods": [
     {{"days": "weekdays" or "weekends" or "every", "ready": "HH:MM", "until": "HH:MM",
       "temp": number, "why": "short reason"}}
@@ -358,10 +386,11 @@ def parse_plan(text):
         except (TypeError, ValueError, AttributeError):
             continue
 
-    if not periods and not rules:
+    summary = short(data.get("summary"), 1500)
+    if not periods and not rules and not summary:
         return None
     return {
-        "summary": short(data.get("summary"), 600),
+        "summary": summary,
         "periods": periods[:8],
         "weather_rules": rules[:6],
         "tips": [short(t, 200) for t in (data.get("tips") or [])][:3],
@@ -549,9 +578,11 @@ class Planner:
         prompt = PLAN_PROMPT.format(
             facts=json.dumps(digest, indent=1),
             extra=f"What the homeowner says: {extra}\n" if extra else "")
-        result = await self.ai.ask(self.heating.web, prompt, parse_plan, max_tokens=1500)
+        result = await self.ai.ask(self.heating.web, prompt, parse_plan, max_tokens=3000)
         if not result:
-            raise ValueError("The AI didn't come back with a usable plan. Try again in a minute.")
+            why = self.ai.last_problem
+            raise ValueError(f"No plan this time: {why}." if why else
+                             "The AI didn't come back with a usable plan. Try again in a minute.")
         plan, who = result
         plan.update({"who": who, "ts": int(time.time()), "days_of_data": digest["days_of_data"]})
         self._set("suggestion", plan)
@@ -561,6 +592,8 @@ class Planner:
         plan = self._get("suggestion")
         if not plan:
             raise ValueError("There's no suggestion to use")
+        if not plan["periods"] and not plan["weather_rules"]:
+            raise ValueError("That answer didn't include a plan, so there's nothing to use")
         db = self.store.db
         db.execute("DELETE FROM plan")
         db.execute("DELETE FROM weather_rules")

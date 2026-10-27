@@ -156,3 +156,14 @@ def test_hands_back_to_the_esi_schedule_afterwards():
     p._set("our_boost", {"ends": at(9) + 600, "temp": 20})
     asyncio.run(p.tick(now=at(11)))
     assert heating.calls == [("mode", "0")]
+
+
+def test_plan_answer_with_only_a_summary():
+    plan = sh.parse_plan('{"summary": "Your house warms about 1 degree an hour.", "periods": [], "weather_rules": []}')
+    assert plan["summary"].startswith("Your house") and plan["periods"] == []
+
+
+def test_friendly_errors():
+    assert "allowance" in sh.friendly_error(RuntimeError("HTTP 429 {'error': 'RESOURCE_EXHAUSTED'}"))
+    assert "model name" in sh.friendly_error(RuntimeError("HTTP 404 models/x is not found"))
+    assert "key" in sh.friendly_error(RuntimeError("HTTP 401 authentication_error"))
