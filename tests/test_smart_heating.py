@@ -167,3 +167,19 @@ def test_friendly_errors():
     assert "allowance" in sh.friendly_error(RuntimeError("HTTP 429 {'error': 'RESOURCE_EXHAUSTED'}"))
     assert "model name" in sh.friendly_error(RuntimeError("HTTP 404 models/x is not found"))
     assert "key" in sh.friendly_error(RuntimeError("HTTP 401 authentication_error"))
+
+
+def test_failure_reasons_are_kept_per_request():
+    import asyncio
+
+    class Broken(sh.AiAdvisor):
+        async def _gemini(self, session, prompt):
+            raise RuntimeError("HTTP 429 RESOURCE_EXHAUSTED")
+
+        async def _claude(self, session, prompt, max_tokens=200):
+            return "Here are my thoughts, no JSON"
+
+    ai = Broken({"gemini_api_key": "x", "claude_api_key": "y"})
+    problems = []
+    assert asyncio.run(ai.ask(None, "p", sh.parse_plan, problems=problems)) is None
+    assert "Gemini didn't answer" in problems[0] and "Claude replied" in problems[1]

@@ -159,7 +159,6 @@ class AiAdvisor:
         self.config = config
         self.calls_today = 0
         self.calls_day = None
-        self.last_problem = None
 
     @property
     def available(self):
@@ -175,17 +174,18 @@ class AiAdvisor:
             self.calls_day, self.calls_today = today, 0
         return self.calls_today < int(self.config.get("max_calls_per_day") or 40)
 
-    async def ask(self, session, prompt, check, max_tokens=200):
+    async def ask(self, session, prompt, check, max_tokens=200, problems=None):
         """
         Ask each AI in turn until one gives an answer that check() can read.
         Returns (answer, who) or None.
         """
-        self.last_problem = None
+        problems = [] if problems is None else problems
         if not self._under_cap():
             print("Smart heating: daily AI limit reached, using the rules")
-            self.last_problem = "the daily limit of AI questions has been reached"
+            problems.append("the daily limit of AI questions has been reached")
             return None
-        problems = []
+        if not self.providers():
+            problems.append("no AI keys found in heating_config.ini")
         for provider in self.providers():
             try:
                 self.calls_today += 1
@@ -203,7 +203,6 @@ class AiAdvisor:
             except Exception as err:
                 print(f"Smart heating: {provider} didn't answer ({err})")
                 problems.append(f"{provider.capitalize()} didn't answer ({friendly_error(err)})")
-        self.last_problem = "; ".join(problems) or None
         return None
 
     async def decide(self, session, facts):
@@ -578,11 +577,11 @@ class Planner:
         prompt = PLAN_PROMPT.format(
             facts=json.dumps(digest, indent=1),
             extra=f"What the homeowner says: {extra}\n" if extra else "")
-        result = await self.ai.ask(self.heating.web, prompt, parse_plan, max_tokens=3000)
+        problems = []
+        result = await self.ai.ask(self.heating.web, prompt, parse_plan, max_tokens=3000, problems=problems)
         if not result:
-            why = self.ai.last_problem
-            raise ValueError(f"No plan this time: {why}." if why else
-                             "The AI didn't come back with a usable plan. Try again in a minute.")
+            print(f"Smart heating: plan request failed: {problems}")
+            raise ValueError("No plan this time: " + ("; ".join(problems) or "no reason given") + ".")
         plan, who = result
         plan.update({"who": who, "ts": int(time.time()), "days_of_data": digest["days_of_data"]})
         self._set("suggestion", plan)
