@@ -305,3 +305,30 @@ def test_already_at_the_background_counts_as_ours(tmp_path):
     p.set_takeover(True, 16)
     asyncio.run(p.tick(at_hour(12)))
     assert heat.calls == [] and not p._get("paused_until", 0) and p._get("our_hold") == 16.0
+
+
+def test_full_control_takes_back_after_stepping_back(tmp_path):
+    heat = FakeHeat(mode="5", target=17.0)      # turned down by hand this morning
+    p = full_planner(heat, tmp_path)
+    p.add_period("weekdays", "07:00", "09:00", 18)
+    p.add_period("weekends", "08:00", "10:00", 18)
+    p.set_takeover(True, 16)
+    p._set("our_hold", 16.0)
+    asyncio.run(p.tick(at_hour(12)))             # a change by hand: steps back
+    assert heat.calls == [] and p._get("paused_until") > at_hour(12)
+    asyncio.run(p.tick(p._get("paused_until") + 60))   # step-back over: takes control back
+    assert heat.calls[0] == ("manual", 16.0)
+
+
+def test_resume_takes_back_straight_away(tmp_path):
+    heat = FakeHeat(mode="5", target=17.0)
+    p = full_planner(heat, tmp_path)
+    p.set_takeover(True, 16)
+    asyncio.run(p.tick(at_hour(12)))
+    assert heat.calls == []
+    p.resume()
+    asyncio.run(p.tick(at_hour(12, 1)))
+    assert heat.calls == [("manual", 16.0)]
+    heat.dev.update(target=20.0)                 # a new change by hand later still gets respected
+    asyncio.run(p.tick(at_hour(13)))
+    assert heat.calls == [("manual", 16.0)] and p._get("paused_until", 0) > at_hour(13)

@@ -665,13 +665,13 @@ class Planner:
         self._note(f"Full control on: {self.background:.1f}° between warm periods" if on
                    else "Full control off: your ESi schedule runs between warm periods")
 
-    def pause_after_manual(self, action=None):
+    def pause_after_manual(self, action=None, now=None):
         """You changed it by hand, so step back until the current/next warm period ends."""
         if not self.enabled:
             return
         if action == "schedule" and not self._get("our_boost") and not self.takeover:
             return   # back to schedule when we weren't doing anything: nothing to step back from
-        now = time.time()
+        now = now or time.time()
         upcoming = self.occurrences(now)
         until = upcoming[0][1] if upcoming and upcoming[0][0] - EARLIEST_START_HOURS * 3600 <= now \
             else now + 3 * 3600
@@ -682,6 +682,7 @@ class Planner:
 
     def resume(self):
         self._set("paused_until", 0)
+        self._set("take_back", True)
         self._note("Smart heating resumed")
 
     # ----- facts -----
@@ -766,20 +767,34 @@ class Planner:
         outside = await self.heating.outside_temp()
         self.last_outside = outside
 
-        if self._get("paused_until", 0) > now:
+        paused_until = self._get("paused_until", 0)
+        if paused_until > now:
             return
+        # A step-back that has just run out, or Resume pressed: take control back this time
+        take_back = bool(paused_until) or bool(self._get("take_back"))
+        if take_back:
+            self._set("paused_until", 0)
+            self._set("take_back", False)
 
         # Has someone set the heating by hand (Off, Hold, or a boost we didn't start)?
         ok_modes = (MODE_SCHEDULE, MODE_BOOST)
         if mode not in ok_modes and not holding or (mode == MODE_BOOST and not ours):
-            if self.takeover and mode != MODE_OFF:
-                # With full control, step back for a while, then take over again
-                self.pause_after_manual()
-                return
-            if ours:
+            if self.takeover and take_back:
+                # With full control, the step-back is over: carry on as if it were ours
+                ours = None
                 self._set("our_boost", None)
-            self._note(f"Leaving it alone: the heating is on {dev['mode_name']}, set by hand")
-            return
+                self.store.log(device_id, f"Smart: taking control back from {dev['mode_name']}")
+                await self._hold_background(device_id, "Taking control back")
+                holding = True
+            elif self.takeover and mode != MODE_OFF:
+                # With full control, step back for a while, then take over again
+                self.pause_after_manual(now=now)
+                return
+            else:
+                if ours:
+                    self._set("our_boost", None)
+                self._note(f"Leaving it alone: the heating is on {dev['mode_name']}, set by hand")
+                return
         if ours and mode != MODE_BOOST:
             # Our boost ended or was cancelled in the app
             ours = None
