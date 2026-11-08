@@ -332,3 +332,30 @@ def test_resume_takes_back_straight_away(tmp_path):
     heat.dev.update(target=20.0)                 # a new change by hand later still gets respected
     asyncio.run(p.tick(at_hour(13)))
     assert heat.calls == [("manual", 16.0)] and p._get("paused_until", 0) > at_hour(13)
+
+
+def test_empty_ai_replies_say_why():
+    import asyncio
+    import smart_heating as sh
+
+    class Resp:
+        status = 200
+        def __init__(self, data):
+            self.data = data
+        async def json(self, content_type=None):
+            return self.data
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+
+    class Session:
+        def post(self, url, **k):
+            if "anthropic" in url:
+                return Resp({"content": [{"type": "thinking", "thinking": "hmm"}], "stop_reason": "max_tokens"})
+            return Resp({"candidates": [{"content": {}, "finishReason": "MAX_TOKENS"}]})
+
+    ai = sh.AiAdvisor({"gemini_api_key": "x", "claude_api_key": "y"})
+    problems = []
+    assert asyncio.run(ai.ask(Session(), "q", sh.parse_answer, problems=problems)) is None
+    assert "MAX_TOKENS" in problems[0] and "max_tokens" in problems[1]

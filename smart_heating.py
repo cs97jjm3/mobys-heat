@@ -184,7 +184,7 @@ class AiAdvisor:
             self.calls_day, self.calls_today = today, 0
         return self.calls_today < int(self.config.get("max_calls_per_day") or 40)
 
-    async def ask(self, session, prompt, check, max_tokens=200, problems=None):
+    async def ask(self, session, prompt, check, max_tokens=1000, problems=None):
         """
         Ask each AI in turn until one gives an answer that check() can read.
         Returns (answer, who) or None.
@@ -211,6 +211,8 @@ class AiAdvisor:
                 print(f"Smart heating: {provider} gave an answer I couldn't read: {text[:200]}")
                 problems.append(f"{provider.capitalize()} replied but not in the shape needed")
             except Exception as err:
+                if isinstance(err, asyncio.TimeoutError) or (not str(err) and "Timeout" in err.__class__.__name__):
+                    err = RuntimeError("it took too long to answer")
                 print(f"Smart heating: {provider} didn't answer ({err})")
                 problems.append(f"{provider.capitalize()} didn't answer ({friendly_error(err)})")
         return None
@@ -237,9 +239,13 @@ class AiAdvisor:
             data = await r.json(content_type=None)
             if r.status != 200:
                 raise RuntimeError(f"HTTP {r.status} {str(data)[:150]}")
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        cand = (data.get("candidates") or [{}])[0]
+        text = "".join(p.get("text", "") for p in (cand.get("content") or {}).get("parts") or [])
+        if not text.strip():
+            raise RuntimeError(f"an empty reply (Gemini stopped because: {cand.get('finishReason', 'no reason given')})")
+        return text
 
-    async def _claude(self, session, prompt, max_tokens=200):
+    async def _claude(self, session, prompt, max_tokens=1000):
         model = self.config.get("claude_model") or "claude-haiku-5-5"
         headers = {
             "x-api-key": self.config["claude_api_key"],
@@ -253,7 +259,11 @@ class AiAdvisor:
             data = await r.json(content_type=None)
             if r.status != 200:
                 raise RuntimeError(f"HTTP {r.status} {str(data)[:150]}")
-        return "".join(part.get("text", "") for part in data["content"])
+        text = "".join(part.get("text", "") for part in data.get("content") or [] if part.get("type", "text") == "text")
+        if not text.strip():
+            # usually the reply ran out of room (for example the model thought first and used it up)
+            raise RuntimeError(f"an empty reply (Claude stopped because: {data.get('stop_reason', 'no reason given')})")
+        return text
 
 
 def friendly_error(err):
@@ -269,6 +279,8 @@ def friendly_error(err):
         return "out of credit"
     if "529" in text or "503" in text or "overloaded" in text.lower():
         return "it's busy, try again shortly"
+    if "empty reply" in text or "too long" in text:
+        return text[:80]
     return err.__class__.__name__ if not text else text[:80]
 
 
